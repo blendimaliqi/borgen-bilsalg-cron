@@ -9,13 +9,21 @@ if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
   process.exit(1);
 }
 
+const BROWSER_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Language": "nb-NO,nb;q=0.9,no;q=0.8,nn;q=0.7,en;q=0.6",
+  "Accept-Encoding": "gzip, deflate, br",
+  "Cache-Control": "no-cache",
+  Pragma: "no-cache",
+};
+
 async function fetchDetailPage(url) {
   try {
     const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Borgen Bilsalg Website/1.0",
-        Accept: "text/html",
-      },
+      headers: BROWSER_HEADERS,
     });
     if (!response.ok) return null;
     const html = await response.text();
@@ -138,10 +146,7 @@ async function scrape() {
   const response = await fetch(
     `https://www.finn.no/mobility/search/car?orgId=${ORG_ID}`,
     {
-      headers: {
-        "User-Agent": "Borgen Bilsalg Website/1.0",
-        Accept: "text/html",
-      },
+      headers: BROWSER_HEADERS,
     }
   );
 
