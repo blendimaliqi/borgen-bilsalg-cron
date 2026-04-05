@@ -1,0 +1,11 @@
+{
+  "name": "borgen-bilsalg-cron",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "scrape": "node scrape.mjs"
+  },
+  "dependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
