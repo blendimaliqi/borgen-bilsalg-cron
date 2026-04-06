@@ -2,7 +2,7 @@ name: Scrape Finn.no
 
 on:
   schedule:
-    - cron: "*/30 * * * *" # Every 30 minutes
+    - cron: "17 * * * *" # Every hour at xx:17 to reduce request bursts
   workflow_dispatch: # Allow manual trigger
 
 jobs:

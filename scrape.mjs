@@ -20,12 +20,74 @@ const BROWSER_HEADERS = {
   Pragma: "no-cache",
 };
 
+const RETRYABLE_STATUS_CODES = new Set([403, 429, 500, 502, 503, 504]);
+const LISTING_RETRY_ATTEMPTS = 3;
+const DETAIL_RETRY_ATTEMPTS = 2;
+const DETAIL_BATCH_SIZE = 3;
+const DETAIL_BATCH_DELAY_MS = 1200;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelayMs(attempt) {
+  return 1500 * 2 ** attempt + Math.floor(Math.random() * 500);
+}
+
+async function fetchWithRetry(url, { context, attempts }) {
+  let lastStatus = null;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let response;
+
+    try {
+      response = await fetch(url, {
+        headers: BROWSER_HEADERS,
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) {
+        break;
+      }
+
+      const waitMs = getRetryDelayMs(attempt);
+      console.warn(
+        `${context} request failed: ${error.message}. Retrying in ${waitMs}ms (${attempt + 1}/${attempts})`
+      );
+      await delay(waitMs);
+      continue;
+    }
+
+    if (response.ok) {
+      return response;
+    }
+
+    lastStatus = response.status;
+    if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt === attempts - 1) {
+      throw new Error(`Failed to fetch ${context}: ${response.status}`);
+    }
+
+    const waitMs = getRetryDelayMs(attempt);
+    console.warn(
+      `${context} returned ${response.status}. Retrying in ${waitMs}ms (${attempt + 1}/${attempts})`
+    );
+    await delay(waitMs);
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  throw new Error(`Failed to fetch ${context}: ${lastStatus ?? "unknown error"}`);
+}
+
 async function fetchDetailPage(url) {
   try {
-    const response = await fetch(url, {
-      headers: BROWSER_HEADERS,
+    const response = await fetchWithRetry(url, {
+      context: `detail page ${url}`,
+      attempts: DETAIL_RETRY_ATTEMPTS,
     });
-    if (!response.ok) return null;
     const html = await response.text();
     const dom = new JSDOM(html);
     return dom.window.document;
@@ -140,19 +202,32 @@ function extractPublishedDate(element) {
   return new Date().toISOString().split("T")[0];
 }
 
+async function fetchDetailPages(urls) {
+  const detailPages = new Array(urls.length).fill(null);
+
+  for (let i = 0; i < urls.length; i += DETAIL_BATCH_SIZE) {
+    const batch = urls.slice(i, i + DETAIL_BATCH_SIZE);
+    const batchPages = await Promise.all(batch.map((url) => fetchDetailPage(url)));
+
+    batchPages.forEach((page, index) => {
+      detailPages[i + index] = page;
+    });
+
+    if (i + DETAIL_BATCH_SIZE < urls.length) {
+      await delay(DETAIL_BATCH_DELAY_MS);
+    }
+  }
+
+  return detailPages;
+}
+
 async function scrape() {
   console.log("Fetching car listings from Finn.no...");
 
-  const response = await fetch(
-    `https://www.finn.no/mobility/search/car?orgId=${ORG_ID}`,
-    {
-      headers: BROWSER_HEADERS,
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch from Finn.no: ${response.status}`);
-  }
+  const response = await fetchWithRetry(`https://www.finn.no/mobility/search/car?orgId=${ORG_ID}`, {
+    context: "listing page from Finn.no",
+    attempts: LISTING_RETRY_ATTEMPTS,
+  });
 
   const html = await response.text();
   const dom = new JSDOM(html);
@@ -259,8 +334,10 @@ async function scrape() {
     .filter((c) => c.url.includes("finn.no") && c.url.includes("/mobility/item/"))
     .map((c) => c.url);
 
-  console.log(`Fetching ${detailUrls.length} detail pages in parallel...`);
-  const detailPages = await Promise.all(detailUrls.map((url) => fetchDetailPage(url)));
+  console.log(
+    `Fetching ${detailUrls.length} detail pages in batches of ${DETAIL_BATCH_SIZE}...`
+  );
+  const detailPages = await fetchDetailPages(detailUrls);
 
   const detailMap = new Map();
   detailUrls.forEach((url, i) => {
